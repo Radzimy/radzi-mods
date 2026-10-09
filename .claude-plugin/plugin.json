@@ -1,0 +1,5 @@
+{
+  "name": "feature-ideas",
+  "version": "0.1.0",
+  "description": "Suggests 3 valuable things to build for the current project, each with a Build button"
+}

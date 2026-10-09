@@ -1,0 +1,5 @@
+{
+  "name": "radzi-mods",
+  "owner": { "name": "Radzi" },
+  "plugins": [{ "name": "feature-ideas", "source": "./" }]
+}
