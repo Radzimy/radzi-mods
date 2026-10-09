@@ -11,6 +11,12 @@ const KEY_FILE = /^(readme|claude|agents|package\.json|pyproject\.toml|cargo\.to
 const MAX_ENTRIES = 400
 const MAX_FILE_CHARS = 4000
 const MAX_FILES_READ = 6
+// Notes a session leaves about what it built. Read with a bigger budget than
+// key files, so the model sees what is already done before it suggests anything.
+const NOTE_FILES = ['docs/CHAT_HANDOFF.md', 'CHAT_HANDOFF.md', 'HANDOFF.md', 'docs/HANDOFF.md', 'CONTINUITY.md', 'CHANGELOG.md']
+const MAX_NOTES_READ = 2
+const MAX_NOTE_CHARS = 12000
+const GIT_LOG_COUNT = '60'
 
 type Idea = { title: string; description: string; why: string; buildPrompt: string }
 type Saved = {
@@ -62,7 +68,32 @@ async function snapshot($: EngineInterface, cwd: string): Promise<string> {
     if (text) files.push(`--- ${path} ---\n${text.slice(0, MAX_FILE_CHARS)}`)
   }
 
-  return `Folder: ${cwd}\n\nFiles:\n${lines.join('\n')}\n\n${files.join('\n\n')}`
+  return `Folder: ${cwd}\n\nFiles:\n${lines.join('\n')}\n\n${files.join('\n\n')}${await doneSoFar($, cwd)}`
+}
+
+// What the project already has: recent commits and any handoff notes.
+// Both are optional; a folder that is not a git repo just has no log.
+async function doneSoFar($: EngineInterface, cwd: string): Promise<string> {
+  const parts: string[] = []
+
+  const log = await $.process
+    .run(['git', 'log', `-n${GIT_LOG_COUNT}`, '--date=short', '--format=%h %ad %s'], { cwd })
+    .catch(() => undefined)
+  if (log && log.exitCode === 0 && log.stdout.trim()) {
+    parts.push(`--- recent commits (git log, newest first) ---\n${log.stdout.trim()}`)
+  }
+
+  let notesRead = 0
+  for (const path of NOTE_FILES) {
+    if (notesRead >= MAX_NOTES_READ) break
+    const text = await $.fs.read(`${cwd}/${path}`).catch(() => '')
+    if (!text) continue
+    const cut = text.length > MAX_NOTE_CHARS ? `${text.slice(0, MAX_NOTE_CHARS)}\n[…cut]` : text
+    parts.push(`--- ${path} (handoff notes) ---\n${cut}`)
+    notesRead++
+  }
+
+  return parts.length ? `\n\nAlready done in this project:\n\n${parts.join('\n\n')}` : ''
 }
 
 const SYSTEM = `You look at a project folder and suggest the three most valuable things
@@ -70,6 +101,10 @@ Claude Code could build in it next. The project may be software, or a folder of
 documents for a business, government or consulting programme; fit the ideas to
 what is actually there. Each idea must be concrete, buildable in one or a few
 Claude Code sessions, and add clear value. Do not suggest things that already exist.
+The snapshot may end with recent commits and handoff notes: they record work
+already done. Never suggest something they show as built or mostly built, even
+when a spec, design or handoff folder for it is still in the tree; suggest what
+they list as open, next or missing instead.
 
 Reply with JSON only, no prose and no code fence:
 [{"title": "...", "description": "one or two sentences: what it is",
